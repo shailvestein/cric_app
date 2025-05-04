@@ -6,39 +6,40 @@ from datetime import datetime, timedelta
 import streamlit as st
 import io
 
-# Step 1: Get Player Profile URL for IPL
+# Step 1: Get Player Profile URL for IPL from Cricbuzz
 def get_player_profile_url(player_name):
     query = player_name.replace(' ', '+')
-    url = f"https://www.espncricinfo.com/search/_/q/{query}"
+    url = f"https://www.cricbuzz.com/search?q={query}"
     response = requests.get(url)
     soup = BeautifulSoup(response.text, 'html.parser')
     links = soup.find_all('a', href=True)
     for link in links:
         if '/player/' in link['href']:
-            return 'https://www.espncricinfo.com' + link['href']
+            return 'https://www.cricbuzz.com' + link['href']
     return None
 
 # Step 2: Extract Player ID
 def get_player_id(profile_url):
-    match = re.search(r'/player/.+?-(\d+)', profile_url)
+    match = re.search(r'/player/(.+?)/', profile_url)
     return match.group(1) if match else None
 
 # Step 3: Generate Filtered URL for IPL matches
 def generate_filtered_url(player_id, filters, stats_type="batting", tournament="ipl"):
-    base = f"https://stats.espncricinfo.com/ci/engine/player/{player_id}.html"
-    params = ["template=results", f"type={stats_type}", "class=3", "filter=advanced", f"tournament={tournament}"]
+    base = f"https://www.cricbuzz.com/profiles/{player_id}/career-stats"
+    params = [f"stats_type={stats_type}", f"tournament={tournament}"]
     for key, val in filters.items():
         if val:
             params.append(f"{key}={val}")
-    return base + "?" + ";".join(params)
+    return base + "?" + "&".join(params)
 
-# Step 4: Scrape Stats Table
+# Step 4: Scrape Stats Table from Cricbuzz
 def scrape_stats_table(url):
     try:
-        tables = pd.read_html(url)
-        for table in tables:
-            if 'Runs' in table.columns or 'Wickets' in table.columns:
-                return table
+        response = requests.get(url)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        table = soup.find('table', class_='cb-col cb-col-100 cb-ltst-wgt-hdr')
+        if table:
+            return pd.read_html(str(table))[0]
     except:
         return None
     return None
@@ -49,11 +50,11 @@ def get_match_details(match_url):
     soup = BeautifulSoup(response.text, 'html.parser')
     
     # Extract Ground Venue
-    venue = soup.find('span', class_='stadium-name')
+    venue = soup.find('div', class_='cb-col cb-col-100 cb-ltst-wgt-hdr')
     venue_name = venue.get_text() if venue else "Not available"
     
     # Extract Pitch Report
-    pitch_report = soup.find('div', class_='pitch-report')
+    pitch_report = soup.find('div', class_='cb-col cb-col-100 cb-ltst-wgt-hdr')
     pitch_info = pitch_report.get_text() if pitch_report else "Pitch report not available"
     
     return venue_name, pitch_info
@@ -140,7 +141,7 @@ def main():
         # Fetch Match Details (Ground Venue and Pitch Report)
         st.subheader("Ground Venue and Pitch Report")
         
-        match_url = f"https://www.espncricinfo.com/match/{player_id}/scorecard"  # Replace with accurate match URL
+        match_url = f"https://www.cricbuzz.com/live-cricket-scorecard/{player_id}"  # Replace with accurate match URL
         venue_name, pitch_info = get_match_details(match_url)
         
         st.write(f"**Ground Venue**: {venue_name}")
