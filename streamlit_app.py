@@ -12,13 +12,17 @@ def get_player_profile_url(player_name):
     url = f"https://www.cricbuzz.com/search?q={query}"
     response = requests.get(url)
     soup = BeautifulSoup(response.text, 'html.parser')
+    
+    # Search for player profile link
     links = soup.find_all('a', href=True)
     for link in links:
+        # Check if the URL contains '/player/', this is the format Cricbuzz uses for player pages
         if '/player/' in link['href']:
-            return 'https://www.cricbuzz.com' + link['href']
-    return None
+            player_url = 'https://www.cricbuzz.com' + link['href']
+            return player_url
+    return None  # If no link is found
 
-# Step 2: Extract Player ID
+# Step 2: Extract Player ID from Cricbuzz Profile URL
 def get_player_id(profile_url):
     match = re.search(r'/player/(.+?)/', profile_url)
     return match.group(1) if match else None
@@ -40,7 +44,8 @@ def scrape_stats_table(url):
         table = soup.find('table', class_='cb-col cb-col-100 cb-ltst-wgt-hdr')
         if table:
             return pd.read_html(str(table))[0]
-    except:
+    except Exception as e:
+        print(f"Error scraping stats: {e}")
         return None
     return None
 
@@ -74,10 +79,14 @@ def main():
         profile_url = get_player_profile_url(player_name)
         
         if not profile_url:
-            st.error("Player not found.")
+            st.error("Player not found. Please try with another name.")
             return
 
         player_id = get_player_id(profile_url)
+        if not player_id:
+            st.error("Unable to extract player ID.")
+            return
+        
         st.success(f"Found Player ID: {player_id}")
         
         # Filter Inputs for IPL only
