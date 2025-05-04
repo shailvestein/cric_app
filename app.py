@@ -1,0 +1,150 @@
+import requests
+from bs4 import BeautifulSoup
+import pandas as pd
+import re
+from datetime import datetime, timedelta
+import streamlit as st
+import io
+
+# Step 1: Get Player Profile URL for IPL
+def get_player_profile_url(player_name):
+    query = player_name.replace(' ', '+')
+    url = f"https://www.espncricinfo.com/search/_/q/{query}"
+    response = requests.get(url)
+    soup = BeautifulSoup(response.text, 'html.parser')
+    links = soup.find_all('a', href=True)
+    for link in links:
+        if '/player/' in link['href']:
+            return 'https://www.espncricinfo.com' + link['href']
+    return None
+
+# Step 2: Extract Player ID
+def get_player_id(profile_url):
+    match = re.search(r'/player/.+?-(\d+)', profile_url)
+    return match.group(1) if match else None
+
+# Step 3: Generate Filtered URL for IPL matches
+def generate_filtered_url(player_id, filters, stats_type="batting", tournament="ipl"):
+    base = f"https://stats.espncricinfo.com/ci/engine/player/{player_id}.html"
+    params = ["template=results", f"type={stats_type}", "class=3", "filter=advanced", f"tournament={tournament}"]
+    for key, val in filters.items():
+        if val:
+            params.append(f"{key}={val}")
+    return base + "?" + ";".join(params)
+
+# Step 4: Scrape Stats Table
+def scrape_stats_table(url):
+    try:
+        tables = pd.read_html(url)
+        for table in tables:
+            if 'Runs' in table.columns or 'Wickets' in table.columns:
+                return table
+    except:
+        return None
+    return None
+
+# Step 5: Extract Ground Venue and Pitch Report (if available)
+def get_match_details(match_url):
+    response = requests.get(match_url)
+    soup = BeautifulSoup(response.text, 'html.parser')
+    
+    # Extract Ground Venue
+    venue = soup.find('span', class_='stadium-name')
+    venue_name = venue.get_text() if venue else "Not available"
+    
+    # Extract Pitch Report
+    pitch_report = soup.find('div', class_='pitch-report')
+    pitch_info = pitch_report.get_text() if pitch_report else "Pitch report not available"
+    
+    return venue_name, pitch_info
+
+# Convert DataFrame to CSV
+def convert_df_to_csv(df):
+    return df.to_csv(index=False).encode('utf-8')
+
+# Streamlit Web App
+def main():
+    st.title("IPL Player Performance Analyzer")
+    
+    # Player Name Input
+    player_name = st.text_input("Enter Player Name", "")
+    
+    if player_name:
+        profile_url = get_player_profile_url(player_name)
+        
+        if not profile_url:
+            st.error("Player not found.")
+            return
+
+        player_id = get_player_id(profile_url)
+        st.success(f"Found Player ID: {player_id}")
+        
+        # Filter Inputs for IPL only
+        st.subheader("Apply Filters for IPL Matches")
+        
+        bp = st.text_input("Batting Position (1-7 or leave blank): ")
+        opp = st.text_input("Opposition Team ID (e.g., Mumbai Indians=7, CSK=4, etc.): ")
+        res = st.selectbox("Match Result", ["All", "Won", "Lost", "Draw"])
+        inn = st.selectbox("Innings Number", ["All", "1", "2"])
+        
+        # Date Range for last 1 year
+        today = datetime.today()
+        spanmax = today.strftime('%Y-%m-%d')
+        spanmin = (today - timedelta(days=365)).strftime('%Y-%m-%d')
+        
+        filters = {
+            "batting_position": bp,
+            "opposition": opp,
+            "result": "1" if res == "Won" else "2" if res == "Lost" else "3" if res == "Draw" else "",
+            "innings_number": inn if inn != "All" else "",
+            "spanmin": spanmin,
+            "spanmax": spanmax
+        }
+        
+        # Batting Stats
+        st.subheader("Batting Stats")
+        batting_url = generate_filtered_url(player_id, filters, stats_type="batting", tournament="ipl")
+        batting_df = scrape_stats_table(batting_url)
+        
+        if batting_df is not None:
+            st.write(batting_df)
+            # Add Download Button for Batting Stats CSV
+            csv_batting = convert_df_to_csv(batting_df)
+            st.download_button(
+                label="Download Batting Stats as CSV",
+                data=csv_batting,
+                file_name=f"{player_name}_ipl_batting_stats.csv",
+                mime="text/csv"
+            )
+        else:
+            st.warning("No Batting stats found for the applied filters.")
+        
+        # Bowling Stats
+        st.subheader("Bowling Stats")
+        bowling_url = generate_filtered_url(player_id, filters, stats_type="bowling", tournament="ipl")
+        bowling_df = scrape_stats_table(bowling_url)
+        
+        if bowling_df is not None:
+            st.write(bowling_df)
+            # Add Download Button for Bowling Stats CSV
+            csv_bowling = convert_df_to_csv(bowling_df)
+            st.download_button(
+                label="Download Bowling Stats as CSV",
+                data=csv_bowling,
+                file_name=f"{player_name}_ipl_bowling_stats.csv",
+                mime="text/csv"
+            )
+        else:
+            st.warning("No Bowling stats found for the applied filters.")
+        
+        # Fetch Match Details (Ground Venue and Pitch Report)
+        st.subheader("Ground Venue and Pitch Report")
+        
+        match_url = f"https://www.espncricinfo.com/match/{player_id}/scorecard"  # Replace with accurate match URL
+        venue_name, pitch_info = get_match_details(match_url)
+        
+        st.write(f"**Ground Venue**: {venue_name}")
+        st.write(f"**Pitch Report**: {pitch_info}")
+
+if __name__ == "__main__":
+    main()
